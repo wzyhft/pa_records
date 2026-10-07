@@ -36,6 +36,8 @@ select{background:var(--surface); border:1px solid var(--line); border-radius:6p
 .cbox .lab{display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); font-family:var(--mono); letter-spacing:.03em}
 .cbox canvas{display:block; width:100%; cursor:crosshair}
 #cw{height:300px} #cd{height:330px} #cs{height:130px}
+body.big #cw{height:480px} body.big #cd{height:540px} body.big #cs{height:170px}
+body.big .wrap{max-width:none} body.big .top{max-width:none}
 .toggles{display:flex; gap:10px}
 .toggles label{display:flex; gap:4px; align-items:center; cursor:pointer}
 .panel{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px 14px; position:sticky; top:env(safe-area-inset-top,0px); align-self:start; display:flex; flex-direction:column; gap:12px; max-height:calc(100vh - 24px); overflow:auto}
@@ -64,6 +66,7 @@ details.help{max-width:1500px; margin:0 auto 10px; background:var(--surface); bo
 details.help summary{cursor:pointer; font-weight:600}
 details.help li{margin:2px 0}
 kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); border-radius:3px; padding:0 4px}
+.locked .q, .locked #saveBtn, .locked #needHint, .locked > .chip{pointer-events:none; opacity:.5}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 
@@ -74,6 +77,7 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     <select id="orderSel"><option value="random">随机（标多少都行）</option><option value="batch">按批次</option></select>
     <span id="batchWrap"><label for="batchSel">批次</label> <select id="batchSel"></select></span>
     <span id="progress">载入中…</span>
+    <button type="button" class="btn" id="bigBtn" aria-pressed="false">大图</button>
     <span id="saveState" class="status"></span>
   </div>
 </div>
@@ -105,6 +109,7 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     <li>不要查任何外部信息。如果你认出了这只股票或这段时期，请勾选「我认得这张图」。</li>
     <li>点「标支撑 / 设止损 / 设目标」后，在周线或日线图上点击即可放置价位；再点同一按钮退出。</li>
     <li>快捷键：<kbd>S</kbd>/<kbd>D</kbd> 有/无明显支撑，<kbd>B</kbd>/<kbd>X</kbd> 会/不会买，<kbd>1</kbd>–<kbd>5</kbd> 信心，<kbd>L</kbd> 画线，<kbd>F</kbd> 斐波那契，<kbd>Enter</kbd> 保存并下一张，<kbd>←</kbd>/<kbd>→</kbd> 上一张/下一张。</li>
+    <li>图表可以缩放：在周线或日线上滚动鼠标滚轮放大 / 缩小，按住拖动左右平移，双击复原；右上角「大图」把图表整体放大。</li>
     <li>默认随机出图，标多少张都可以，随时可以停下，已保存的不会丢。</li>
     <li>可以用「画线」在周线或日线上画辅助线（点两下：起点、终点，会向右延长），用「斐波那契」点两下画回撤 / 扩展位。</li>
   </ul>
@@ -124,6 +129,10 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
 
   <form class="panel" id="form" autocomplete="off">
     <div class="status" id="chartTitle">—</div>
+    <div id="fbBox" class="banner" hidden style="margin:0">
+      <div id="fbText" style="margin-bottom:8px"></div>
+      <button type="button" class="btn primary" id="fbNext">下一张 →</button>
+    </div>
 
     <div class="q">
       <div class="t">1. 有明显的长期支撑吗？</div>
@@ -214,6 +223,8 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
   let manifest = [], batch = null, charts = [], idx = 0, labels = new Map();
   let db = null, uid = null, labelsCol = null, mode = null, shownAt = Date.now(), hover = null, profile = null;
   let isOwner = false, order = "random", pending = null, history = [];
+  let arm = "none", keys = {}, revealedMap = {}, pendingRev = [], futData = null, review = null;
+  const decCache = new Map();
   const batchCache = new Map();
   const ob = {pa: null, skill: null, tf: null};
   let cur = emptyLabel();
@@ -278,29 +289,84 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
   // ---------- site mode (outside claude.ai): local progress + POST to the Apps Script receiver ----------
   function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
   function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
-  let outbox = [], flushing = false;
+  let outbox = [], chain = Promise.resolve(), retryTimer = null;
   function enqueue(item) {
-    outbox.push({...item, client_ts: new Date().toISOString()}); lsSet("r2_outbox", outbox); flush();
+    outbox.push({...item, client_ts: new Date().toISOString()}); lsSet("r2_outbox", outbox); return flush();
   }
   async function post(item) {
     const opts = {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(item)};
-    try { const r = await fetch(window.R2_ENDPOINT, opts); return !!(await r.json()).ok; }
+    try { const r = await fetch(window.R2_ENDPOINT, opts); return await r.json(); }
     catch (e) {
-      try { await fetch(window.R2_ENDPOINT, {...opts, mode: "no-cors"}); return true; } catch (e2) { return false; }
+      try { await fetch(window.R2_ENDPOINT, {...opts, mode: "no-cors"}); return {ok: true}; } catch (e2) { return null; }
     }
   }
-  async function flush() {
-    if (flushing) return;
-    flushing = true;
-    try {
-      while (outbox.length) {
-        if (!(await post(outbox[0]))) break;
-        outbox.shift(); lsSet("r2_outbox", outbox);
-      }
-    } finally { flushing = false; }
+  async function drain() {
+    while (outbox.length) {
+      const item = outbox[0], res = await post(item);
+      if (!res || !res.ok) break;
+      if (res.key && item.type === "label") { keys[item.chart_id] = res.key; lsSet("r2_keys", keys); }
+      outbox.shift(); lsSet("r2_outbox", outbox);
+    }
     $("saveState").textContent = outbox.length ? `${outbox.length} 条待上传（联网后会自动重试）` : "已上传";
-    if (outbox.length) setTimeout(flush, 15000);
+    if (outbox.length && !retryTimer) retryTimer = setTimeout(() => { retryTimer = null; flush(); }, 15000);
   }
+  function flush() { chain = chain.then(drain).catch(() => {}); return chain; }
+
+  // ---------- feedback (site mode): encrypted post-decision path, key released by the receiver after the label ----------
+  const pct = p => (p >= 100 ? "+" : "") + (p - 100).toFixed(1) + "%";
+  const b64 = t => Uint8Array.from(atob(t), ch => ch.charCodeAt(0));
+  async function decrypt(id) {
+    if (decCache.has(id)) return decCache.get(id);
+    if (!keys[id]) return null;
+    if (!futData) futData = await (await fetch("r2data/futures.json")).json();
+    const f = futData[id]; if (!f) return null;
+    const k = await crypto.subtle.importKey("raw", b64(keys[id]), "AES-GCM", false, ["decrypt"]);
+    const arr = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: b64(f[0])}, k, b64(f[1]))));
+    decCache.set(id, arr); return arr;
+  }
+  async function reveal(id) {
+    try { if (!(await decrypt(id))) return false; } catch (e) { return false; }
+    revealedMap[id] = Date.now(); lsSet("r2_revealed", revealedMap); return true;
+  }
+  function simR([O, H, L, C], stop, tgt) {
+    const entry = O[0], risk = entry - stop;
+    if (!(risk > 0)) return "次日开盘已在你的止损下方，按计划无法进场。";
+    let exit = C[C.length - 1], why = `${C.length} 天内止损和目标都没碰到，按期末收盘算`;
+    for (let k = 0; k < C.length; k++) {
+      if (k > 0 && O[k] <= stop) { exit = O[k]; why = "跳空跌破止损"; break; }
+      const hs = L[k] <= stop, ht = tgt != null && H[k] >= tgt;
+      if (hs) { exit = stop; why = ht ? "同一天碰到止损和目标（按先止损算）" : "先碰到止损"; break; }
+      if (ht) { exit = k > 0 && O[k] >= tgt ? O[k] : tgt; why = "先碰到目标"; break; }
+    }
+    const r = (exit - entry) / risk;
+    return `按你的止损和目标、次日开盘买入（近似）：${why}，约 ${r >= 0 ? "+" : ""}${r.toFixed(2)}R。`;
+  }
+  function renderFeedback() {
+    const c = charts[idx], box = $("fbBox");
+    if (!c || !revealedMap[c.id]) { box.hidden = true; $("form").classList.remove("locked"); return; }
+    $("form").classList.add("locked"); box.hidden = false;
+    const fut = decCache.get(c.id);
+    if (!fut) { $("fbText").textContent = "结果载入中…"; return; }
+    const [, H, L, C] = fut, lab = labels.get(c.id) || cur;
+    let t = `之后 ${C.length} 个交易日：期末 ${pct(C[C.length - 1])}，最高 ${pct(Math.max(...H))}，最低 ${pct(Math.min(...L))}。`;
+    t += lab.buy === "yes" && lab.stop != null ? " " + simR(fut, lab.stop, lab.target) : " 这张你选择了不买。";
+    $("fbText").textContent = t + " 看过结果的图不能再修改。";
+    if (!review) $("fbNext").textContent = "下一张 →";
+  }
+  async function startReview() {
+    review = {list: pendingRev.splice(0), k: 0}; lsSet("r2_pending_rev", pendingRev);
+    for (const it of review.list) await reveal(it.id);
+    await showReview();
+  }
+  async function showReview() {
+    const it = review.list[review.k];
+    batch = it.b; charts = await getBatch(it.b); idx = charts.findIndex(c => c.id === it.id); show();
+    $("fbNext").textContent = review.k < review.list.length - 1 ? `下一张复盘（${review.k + 1} / ${review.list.length}）` : "复盘结束，继续标注 →";
+  }
+  $("fbNext").onclick = async () => {
+    if (review) { review.k += 1; if (review.k < review.list.length) { await showReview(); return; } review = null; }
+    if (order === "random") await nextRandom(); else if (idx < charts.length - 1) { idx += 1; show(); }
+  };
   async function initHttp() {
     uid = lsGet("r2_rater_id", null);
     if (!uid) {
@@ -310,11 +376,18 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     profile = lsGet("r2_profile", null);
     labels = new Map(Object.entries(lsGet("r2_labels", {})));
     outbox = lsGet("r2_outbox", []);
+    keys = lsGet("r2_keys", {}); revealedMap = lsGet("r2_revealed", {}); pendingRev = lsGet("r2_pending_rev", []);
+    arm = parseInt(uid.slice(-2), 16) % 2 === 0 ? "immediate" : "delayed20";
+    const li = document.createElement("li");
+    li.textContent = arm === "immediate" ? "每保存一张，会显示这张图之后 60 个交易日的走势。看过结果的图不能再修改。"
+      : "每标完 20 张，会统一显示这 20 张图之后 60 个交易日的走势。看过结果的图不能再修改。";
+    $("help").querySelector("ul").appendChild(li);
     db = {doc: () => ({set: async body => {
-      profile = body; lsSet("r2_profile", body); enqueue({type: "profile", rater_id: uid, ...body}); }})};
+      profile = body; lsSet("r2_profile", body); await enqueue({type: "profile", rater_id: uid, arm, ...body}); }})};
     labelsCol = {doc: id => ({set: async body => {
       labels.set(id, body); lsSet("r2_labels", Object.fromEntries(labels));
-      enqueue({type: "label", rater_id: uid, alias: profile && profile.alias, ...body}); }})};
+      await enqueue({type: "label", rater_id: uid, alias: profile && profile.alias, arm,
+                     fb_seen: Object.keys(revealedMap).length, ...body}); }})};
     if (!lsSet("r2_probe", 1)) {
       const b = $("banner");
       b.textContent = "这个浏览器不允许保存进度（例如无痕模式）：标注仍会上传，但关掉页面后无法接着标。";
@@ -450,10 +523,12 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     document.querySelectorAll("#tags input").forEach(i => i.checked = cur.tags.includes(i.value));
     $("note").value = cur.note || "";
     $("recog").checked = !!cur.recognized;
+    rng.cw = null; rng.cd = null;
     mode = null; pending = null; ["mSupport", "mStop", "mTarget", "mLine", "mFib"].forEach(id => $(id).classList.remove("mode-on"));
     $("chartTitle").textContent = (order === "random" ? `随机 · ${c.id}` : `第 ${batch} 批 · 第 ${idx + 1} / ${charts.length} 张 · ${c.id}`)
       + (saved ? " · 已标" : "");
-    renderLists(); validate(); updateProgress(); draw();
+    renderLists(); validate(); updateProgress(); draw(); renderFeedback();
+    if (revealedMap[c.id] && !decCache.has(c.id)) decrypt(c.id).then(() => { renderFeedback(); draw(); }).catch(() => {});
     shownAt = Date.now();
   }
   function setSegSilent(field, v) {
@@ -467,7 +542,7 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
   }
   $("form").addEventListener("submit", async e => {
     e.preventDefault();
-    if ($("saveBtn").disabled) return;
+    if ($("saveBtn").disabled || $("form").classList.contains("locked")) return;
     const c = charts[idx];
     cur.tags = [...document.querySelectorAll("#tags input:checked")].map(i => i.value);
     cur.note = $("note").value.trim().slice(0, 2000);
@@ -482,6 +557,12 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
       await labelsCol.doc(c.id).set(body);
       labels.set(c.id, body);
       $("saveState").textContent = "已保存";
+      if (arm === "immediate" && keys[c.id] && await reveal(c.id)) { show(); return; }
+      if (arm === "delayed20") {
+        pendingRev.push({b: batch, id: c.id}); lsSet("r2_pending_rev", pendingRev);
+        if (pendingRev.length >= 20) { await startReview(); return; }
+        $("saveState").textContent = `已保存 · 再标 ${20 - pendingRev.length} 张后统一看结果`;
+      }
       if (order === "random") { await nextRandom(); return; }
       const next = charts.findIndex((x, i) => i > idx && !labels.has(x.id));
       if (next >= 0) { idx = next; show(); }
@@ -507,10 +588,23 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
   };
   $("batchSel").onchange = e => loadBatch(Number(e.target.value));
   ["tMa1", "tMa2", "tMa3"].forEach(id => $(id).onchange = draw);
+  function setBig(on) {
+    document.body.classList.toggle("big", on); $("bigBtn").setAttribute("aria-pressed", String(on));
+    $("bigBtn").textContent = on ? "小图" : "大图";
+    try { localStorage.setItem("r2_big", on ? "1" : "0"); } catch (e) {}
+    draw();
+  }
+  $("bigBtn").onclick = () => setBig(!document.body.classList.contains("big"));
+  try { if (localStorage.getItem("r2_big") === "1") setBig(true); } catch (e) {}
 
   document.addEventListener("keydown", e => {
     if (["TEXTAREA", "SELECT", "INPUT"].includes(e.target.tagName) && e.target.type !== "checkbox") return;
     if (!$("onboard").hidden) return;
+    if ($("form").classList.contains("locked")) {
+      if (e.key === "Enter") { e.preventDefault(); $("fbNext").click(); }
+      else if (e.key === "ArrowLeft") $("prevBtn").click();
+      return;
+    }
     const k = e.key.toLowerCase();
     if (k === "s") setSeg("support", "yes");
     else if (k === "d") setSeg("support", "no");
@@ -546,42 +640,49 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(+v.toFixed(6));
     return out;
   }
+  const rng = {cw: null, cd: null};          // visible bar window [a, b) per chart; null = everything
+  function futureFor(c) { return (revealedMap[c.id] && decCache.get(c.id)) || null; }
   function drawOHLC(cv, d, opts) {
     const {ctx, W, H} = setupCanvas(cv);
     const padR = 50, padT = 6, volH = opts.vol ? H * 0.16 : 0, padB = 4;
     const [O, Hh, L, C, V] = d;
     const n = C.length, pw = W - padR, ph = H - padT - padB - volH;
+    const [a, b] = opts.range || [0, n], e = Math.min(b, n);
     let lo = Infinity, hi = -Infinity;
-    for (let i = 0; i < n; i++) { if (L[i] != null) lo = Math.min(lo, L[i]); if (Hh[i] != null) hi = Math.max(hi, Hh[i]); }
-    for (const p of opts.extra || []) if (p != null) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+    for (let i = a; i < e; i++) { if (L[i] != null) lo = Math.min(lo, L[i]); if (Hh[i] != null) hi = Math.max(hi, Hh[i]); }
+    if (!isFinite(lo)) { lo = 90; hi = 110; }
     const m = (hi - lo) * 0.04; lo = Math.max(opts.log ? lo * 0.97 : lo - m, 0.01); hi = opts.log ? hi * 1.03 : hi + m;
-    const f = opts.log ? Math.log : (x => x);
+    const f = opts.log ? Math.log : (v => v);
     const y = p => padT + (f(hi) - f(p)) / (f(hi) - f(lo)) * ph;
     const inv = py => { const t = f(hi) - (py - padT) / ph * (f(hi) - f(lo)); return opts.log ? Math.exp(t) : t; };
-    const bw = pw / n, x = i => (i + 0.5) * bw;
+    const bw = pw / (b - a), x = i => (i - a + 0.5) * bw, ix = px => px / bw - 0.5 + a;
     ctx.fillStyle = css("--surface"); ctx.fillRect(0, 0, W, H);
+    if (opts.cut != null && opts.cut < b) {
+      const xc = Math.max(0, x(opts.cut) - bw / 2);
+      ctx.fillStyle = css("--accent-soft"); ctx.fillRect(xc, 0, pw - xc, H);
+    }
     ctx.font = "11px " + css("--mono"); ctx.textBaseline = "middle";
     for (const t of niceTicks(lo, hi, 6, opts.log)) {
       ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(0, y(t)); ctx.lineTo(pw, y(t)); ctx.stroke();
       ctx.fillStyle = css("--muted"); ctx.fillText(t >= 100 ? t.toFixed(0) : t.toFixed(t >= 10 ? 1 : 2), pw + 4, y(t));
     }
     if (opts.vol && V) {
-      const vm = Math.max(...V.filter(v => v != null), 1);
+      let vm = 1; for (let i = a; i < e; i++) if (V[i] != null && V[i] > vm) vm = V[i];
       ctx.fillStyle = css("--line");
-      for (let i = 0; i < n; i++) { const vh = (V[i] || 0) / vm * (volH - 2); ctx.fillRect(x(i) - Math.max(bw * 0.35, 0.5), H - padB - vh, Math.max(bw * 0.7, 1), vh); }
+      for (let i = a; i < e; i++) { const vh = (V[i] || 0) / vm * (volH - 2); ctx.fillRect(x(i) - Math.max(bw * 0.35, 0.5), H - padB - vh, Math.max(bw * 0.7, 1), vh); }
     }
     for (const ma of opts.mas || []) {
       if (!ma.on) continue;
       ctx.strokeStyle = css(ma.color); ctx.lineWidth = 1.2; ctx.beginPath(); let st = false;
-      for (let i = 0; i < n; i++) { const v = ma.data[i]; if (v == null) { st = false; continue; } st ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); st = true; }
+      for (let i = a; i < Math.min(e, ma.data.length); i++) { const v = ma.data[i]; if (v == null) { st = false; continue; } st ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); st = true; }
       ctx.stroke(); ctx.lineWidth = 1;
     }
     if (opts.line) {
       ctx.strokeStyle = css("--accent"); ctx.lineWidth = 1.3; ctx.beginPath();
-      for (let i = 0; i < n; i++) i ? ctx.lineTo(x(i), y(C[i])) : ctx.moveTo(x(i), y(C[i]));
+      for (let i = a; i < e; i++) i > a ? ctx.lineTo(x(i), y(C[i])) : ctx.moveTo(x(i), y(C[i]));
       ctx.stroke(); ctx.lineWidth = 1;
     } else {
-      for (let i = 0; i < n; i++) {
+      for (let i = a; i < e; i++) {
         if (C[i] == null) continue;
         const up = C[i] >= O[i]; ctx.strokeStyle = ctx.fillStyle = css(up ? "--up" : "--down");
         ctx.beginPath(); ctx.moveTo(x(i), y(Hh[i])); ctx.lineTo(x(i), y(L[i])); ctx.stroke();
@@ -589,7 +690,12 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
         else { ctx.beginPath(); ctx.moveTo(x(i), y(C[i])); ctx.lineTo(x(i) + Math.max(bw * 0.5, 1), y(C[i])); ctx.stroke(); }
       }
     }
-    // horizontal labels (support / stop / target / last close)
+    if (opts.cut != null && opts.cut < b) {
+      const xc = x(opts.cut) - bw / 2;
+      ctx.strokeStyle = css("--ink"); ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(xc, padT); ctx.lineTo(xc, H - padB); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = css("--ink"); ctx.fillText("决策日之后", xc + 4, padT + 8);
+    }
+    // horizontal labels (support / stop / target)
     const hl = (p, color, dash, text) => {
       if (p == null || p < lo || p > hi) return;
       ctx.strokeStyle = css(color); ctx.setLineDash(dash); ctx.lineWidth = 1.4;
@@ -600,8 +706,6 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
       cur.support_levels.forEach(p => hl(p, "--support", [], "支撑 " + p.toFixed(2)));
       hl(cur.stop, "--stop", [5, 4], "止损 " + (cur.stop != null ? cur.stop.toFixed(2) : ""));
       hl(cur.target, "--target", [5, 4], "目标 " + (cur.target != null ? cur.target.toFixed(2) : ""));
-    }
-    if (opts.marks) {
       const seg = (i1, p1, i2, p2, dashed) => {
         if (!(p1 > 0 && p2 > 0)) return;
         const X1 = x(i1), Y1 = y(p1), X2 = x(i2), Y2 = y(p2);
@@ -612,7 +716,7 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
           ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(X2, Y2); ctx.lineTo(xr, yr); ctx.stroke();
         }
         ctx.setLineDash([]); ctx.lineWidth = 1; ctx.fillStyle = css("--ink");
-        [[X1, Y1], [X2, Y2]].forEach(([a, b]) => { ctx.beginPath(); ctx.arc(a, b, 2.5, 0, 6.29); ctx.fill(); });
+        [[X1, Y1], [X2, Y2]].forEach(([u, w]) => { ctx.beginPath(); ctx.arc(u, w, 2.5, 0, 6.29); ctx.fill(); });
       };
       const FIB = [[0, ""], [0.236, ""], [0.382, ""], [0.5, ""], [0.618, ""], [0.786, ""], [1, ""], [1.272, "ext"], [1.618, "ext"]];
       const fib = (i1, p1, i2, p2, dashed) => {
@@ -630,10 +734,10 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
         ctx.setLineDash([]);
       };
       ctx.save(); ctx.beginPath(); ctx.rect(0, padT, pw, ph); ctx.clip();
-      cur.drawings.filter(d => d.c === cv.id).forEach(d =>
-        d.t === "fib" ? fib(d.i1, d.p1, d.i2, d.p2, false) : seg(d.i1, d.p1, d.i2, d.p2, false));
+      cur.drawings.filter(dr => dr.c === cv.id).forEach(dr =>
+        dr.t === "fib" ? fib(dr.i1, dr.p1, dr.i2, dr.p2, false) : seg(dr.i1, dr.p1, dr.i2, dr.p2, false));
       if (pending && pending.c === cv.id && hover && hover.cv === cv)
-        (pending.t === "fib" ? fib : seg)(pending.i, pending.p, hover.x / bw - 0.5, inv(hover.y), true);
+        (pending.t === "fib" ? fib : seg)(pending.i, pending.p, ix(hover.x), inv(hover.y), true);
       else if (pending && pending.c === cv.id) { ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(x(pending.i), y(pending.p), 3, 0, 6.29); ctx.fill(); }
       ctx.restore();
     }
@@ -642,27 +746,56 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
       ctx.fillStyle = css("--ink"); ctx.fillRect(pw, hover.y - 8, padR, 16); ctx.fillStyle = css("--surface");
       ctx.fillText(inv(hover.y).toFixed(2), pw + 4, hover.y);
     }
-    views[cv.id] = {inv, pw, padT, ph, bw};
+    views[cv.id] = {inv, ix, pw, padT, ph, bw, a, b, n};
+  }
+  function windowFor(id, n, dflt) {
+    const r = rng[id] || dflt || [0, n];
+    const span = Math.max(20, Math.min(n, r[1] - r[0])), a0 = Math.max(0, Math.min(r[0], n - span));
+    return [a0, a0 + span];
   }
   function draw() {
     if (!charts.length) return;
-    const c = charts[idx];
-    drawOHLC($("cw"), c.w, {log: true, vol: true, marks: true, extra: []});
-    drawOHLC($("cd"), c.d, {vol: true, marks: true, extra: [],
-      mas: [{data: c.ma[0], color: "--ma1", on: $("tMa1").checked}, {data: c.ma[1], color: "--ma2", on: $("tMa2").checked},
-            {data: c.ma[2], color: "--ma3", on: $("tMa3").checked}]});
-    drawOHLC($("cs"), c.spy, {line: true});
-    $("cwInfo").textContent = `${c.w[3].length} 周`;
+    const c = charts[idx], fut = futureFor(c);
+    const nd = c.d[3].length, dd = fut ? c.d.map((arr, k) => arr.concat(fut[k])) : c.d;
+    const pad = fut ? new Array(fut[3].length).fill(null) : [];
+    const rd = windowFor("cd", dd[3].length, fut ? [Math.max(0, nd - 180), dd[3].length] : null);
+    drawOHLC($("cw"), c.w, {log: true, vol: true, marks: true, range: windowFor("cw", c.w[3].length)});
+    drawOHLC($("cd"), dd, {vol: true, marks: true, range: rd, cut: fut ? nd : null,
+      mas: [{data: c.ma[0].concat(pad), color: "--ma1", on: $("tMa1").checked}, {data: c.ma[1].concat(pad), color: "--ma2", on: $("tMa2").checked},
+            {data: c.ma[2].concat(pad), color: "--ma3", on: $("tMa3").checked}]});
+    drawOHLC($("cs"), c.spy, {line: true, range: rd});
+    $("cwInfo").textContent = `${c.w[3].length} 周 · 滚轮缩放，拖动平移，双击复原`;
   }
+  let drag = null, dragMoved = false;
+  window.addEventListener("mousemove", e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    if (Math.abs(dx) > 4) dragMoved = true;
+    if (!dragMoved) return;
+    const span = drag.b - drag.a, na = Math.max(0, Math.min(drag.a + Math.round(-dx / drag.bw), drag.n - span));
+    rng[drag.id] = [na, na + span]; draw();
+  });
+  window.addEventListener("mouseup", () => { drag = null; });
   ["cw", "cd"].forEach(id => {
     const cv = $(id);
-    cv.addEventListener("mousemove", e => { const r = cv.getBoundingClientRect(); hover = {cv, x: e.clientX - r.left, y: e.clientY - r.top}; draw(); });
+    cv.addEventListener("mousemove", e => { const r = cv.getBoundingClientRect(); hover = {cv, x: e.clientX - r.left, y: e.clientY - r.top}; if (!drag) draw(); });
     cv.addEventListener("mouseleave", () => { hover = null; draw(); });
+    cv.addEventListener("wheel", e => {
+      const v = views[id]; if (!v) return;
+      e.preventDefault();
+      const r = cv.getBoundingClientRect(), center = v.ix(e.clientX - r.left), span = v.b - v.a;
+      const ns = Math.max(20, Math.min(v.n, Math.round(span * (e.deltaY > 0 ? 1.2 : 1 / 1.2))));
+      const na = Math.max(0, Math.min(Math.round(center - (center - v.a) / span * ns), v.n - ns));
+      rng[id] = [na, na + ns]; draw();
+    }, {passive: false});
+    cv.addEventListener("mousedown", e => { const v = views[id]; if (v) { drag = {id, x: e.clientX, a: v.a, b: v.b, n: v.n, bw: v.bw}; dragMoved = false; } });
+    cv.addEventListener("dblclick", () => { if (!mode) { rng[id] = null; draw(); } });
     cv.addEventListener("click", e => {
+      if (dragMoved) { dragMoved = false; return; }
       if (!mode || !views[id]) return;
       const r = cv.getBoundingClientRect(), p = +views[id].inv(e.clientY - r.top).toFixed(2);
       if (mode === "line" || mode === "fib") {
-        const i = +((e.clientX - r.left) / views[id].bw - 0.5).toFixed(2);
+        const i = +views[id].ix(e.clientX - r.left).toFixed(2);
         if (!pending || pending.c !== id || pending.t !== mode) pending = {c: id, i, p, t: mode};
         else { cur.drawings.push({t: mode, c: id, i1: pending.i, p1: pending.p, i2: i, p2: p}); pending = null; }
         renderLists(); draw(); return;
