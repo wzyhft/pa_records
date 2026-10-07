@@ -104,9 +104,9 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     <li>价格已归一化（今天收盘 = 100），隐藏了股票代码、日期和板块。下方 SPY 图与日线同一时间窗口，同样归一化。</li>
     <li>不要查任何外部信息。如果你认出了这只股票或这段时期，请勾选「我认得这张图」。</li>
     <li>点「标支撑 / 设止损 / 设目标」后，在周线或日线图上点击即可放置价位；再点同一按钮退出。</li>
-    <li>快捷键：<kbd>S</kbd>/<kbd>D</kbd> 有/无明显支撑，<kbd>B</kbd>/<kbd>X</kbd> 会/不会买，<kbd>1</kbd>–<kbd>5</kbd> 信心，<kbd>L</kbd> 画线，<kbd>Enter</kbd> 保存并下一张，<kbd>←</kbd>/<kbd>→</kbd> 上一张/下一张。</li>
+    <li>快捷键：<kbd>S</kbd>/<kbd>D</kbd> 有/无明显支撑，<kbd>B</kbd>/<kbd>X</kbd> 会/不会买，<kbd>1</kbd>–<kbd>5</kbd> 信心，<kbd>L</kbd> 画线，<kbd>F</kbd> 斐波那契，<kbd>Enter</kbd> 保存并下一张，<kbd>←</kbd>/<kbd>→</kbd> 上一张/下一张。</li>
     <li>默认随机出图，标多少张都可以，随时可以停下，已保存的不会丢。</li>
-    <li>可以用「画线」在周线或日线上画辅助线（点两下：起点、终点，会向右延长）。</li>
+    <li>可以用「画线」在周线或日线上画辅助线（点两下：起点、终点，会向右延长），用「斐波那契」点两下画回撤 / 扩展位。</li>
   </ul>
 </details>
 
@@ -178,10 +178,12 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
       <div class="t">辅助线（可选）</div>
       <div class="row">
         <button type="button" class="btn" id="mLine">画线 <kbd>L</kbd></button>
+        <button type="button" class="btn" id="mFib">斐波那契 <kbd>F</kbd></button>
         <button type="button" class="btn" id="lineUndo">撤销</button>
         <button type="button" class="btn" id="lineClear">清除</button>
       </div>
       <div class="hint" id="lineInfo">在周线或日线上点两下画一条线</div>
+      <div class="hint">斐波那契：先点起点（例如波段低点），再点终点（波段高点），自动画出回撤和扩展位。</div>
     </div>
 
     <div class="q">
@@ -400,13 +402,16 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     $("mStop").classList.toggle("mode-on", mode === "stop");
     $("mTarget").classList.toggle("mode-on", mode === "target");
     $("mLine").classList.toggle("mode-on", mode === "line");
-    if (mode !== "line") pending = null;
+    $("mFib").classList.toggle("mode-on", mode === "fib");
+    if (mode !== "line" && mode !== "fib") pending = null;
+    if (pending && pending.t !== mode) pending = null;
     renderLists(); draw();
   }
   $("mSupport").onclick = () => setMode("support");
   $("mStop").onclick = () => setMode("stop");
   $("mTarget").onclick = () => setMode("target");
   $("mLine").onclick = () => setMode("line");
+  $("mFib").onclick = () => setMode("fib");
   $("lineUndo").onclick = () => { if (pending) pending = null; else cur.drawings.pop(); renderLists(); draw(); };
   $("lineClear").onclick = () => { cur.drawings = []; pending = null; renderLists(); draw(); };
 
@@ -418,8 +423,9 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     if (cur.stop != null) pl.push(`<span>止损 ${cur.stop.toFixed(2)}</span>`);
     if (cur.target != null) pl.push(`<span>目标 ${cur.target.toFixed(2)}</span>`);
     $("planList").innerHTML = pl.join("");
-    $("lineInfo").textContent = cur.drawings.length ? `已画 ${cur.drawings.length} 条线` + (pending ? "，等待终点" : "")
-      : (pending ? "已选起点，再点一下终点" : "在周线或日线上点两下画一条线");
+    const nf = cur.drawings.filter(d => d.t === "fib").length, nl = cur.drawings.length - nf;
+    $("lineInfo").textContent = (nl || nf ? `已画 ${nl} 条线、${nf} 组斐波那契` : "在周线或日线上点两下画一条线")
+      + (pending ? "（已选起点，再点一下终点）" : "");
   }
   $("supportList").addEventListener("click", e => {
     const b = e.target.closest("button[data-i]"); if (!b) return;
@@ -444,7 +450,7 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     document.querySelectorAll("#tags input").forEach(i => i.checked = cur.tags.includes(i.value));
     $("note").value = cur.note || "";
     $("recog").checked = !!cur.recognized;
-    mode = null; pending = null; ["mSupport", "mStop", "mTarget", "mLine"].forEach(id => $(id).classList.remove("mode-on"));
+    mode = null; pending = null; ["mSupport", "mStop", "mTarget", "mLine", "mFib"].forEach(id => $(id).classList.remove("mode-on"));
     $("chartTitle").textContent = (order === "random" ? `随机 · ${c.id}` : `第 ${batch} 批 · 第 ${idx + 1} / ${charts.length} 张 · ${c.id}`)
       + (saved ? " · 已标" : "");
     renderLists(); validate(); updateProgress(); draw();
@@ -512,6 +518,7 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     else if (k === "x") setSeg("buy", "no");
     else if ("12345".includes(k) && k.length === 1 && cur.buy === "yes") setSeg("confidence", Number(k));
     else if (k === "l") setMode("line");
+    else if (k === "f") setMode("fib");
     else if (k === "escape") { pending = null; setMode(null); }
     else if (k === "enter") { e.preventDefault(); $("form").requestSubmit(); }
     else if (k === "arrowleft") $("prevBtn").click();
@@ -607,9 +614,26 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
         ctx.setLineDash([]); ctx.lineWidth = 1; ctx.fillStyle = css("--ink");
         [[X1, Y1], [X2, Y2]].forEach(([a, b]) => { ctx.beginPath(); ctx.arc(a, b, 2.5, 0, 6.29); ctx.fill(); });
       };
+      const FIB = [[0, ""], [0.236, ""], [0.382, ""], [0.5, ""], [0.618, ""], [0.786, ""], [1, ""], [1.272, "ext"], [1.618, "ext"]];
+      const fib = (i1, p1, i2, p2, dashed) => {
+        if (!(p1 > 0 && p2 > 0)) return;
+        const x0 = x(Math.min(i1, i2));
+        ctx.strokeStyle = ctx.fillStyle = css("--ma1"); ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x(i1), y(p1)); ctx.lineTo(x(i2), y(p2)); ctx.stroke();
+        for (const [r, kind] of FIB) {
+          const pr = kind ? p1 + r * (p2 - p1) : p2 - r * (p2 - p1);
+          if (!(pr > 0)) continue;
+          ctx.setLineDash(dashed || kind ? [5, 4] : []); ctx.globalAlpha = r === 0.5 || r === 0.618 ? 1 : 0.75;
+          ctx.beginPath(); ctx.moveTo(x0, y(pr)); ctx.lineTo(pw, y(pr)); ctx.stroke();
+          ctx.globalAlpha = 1; ctx.fillText(`${r} · ${pr.toFixed(2)}`, Math.max(x0, 2) + 2, y(pr) - 7);
+        }
+        ctx.setLineDash([]);
+      };
       ctx.save(); ctx.beginPath(); ctx.rect(0, padT, pw, ph); ctx.clip();
-      cur.drawings.filter(d => d.c === cv.id).forEach(d => seg(d.i1, d.p1, d.i2, d.p2, false));
-      if (pending && pending.c === cv.id && hover && hover.cv === cv) seg(pending.i, pending.p, hover.x / bw - 0.5, inv(hover.y), true);
+      cur.drawings.filter(d => d.c === cv.id).forEach(d =>
+        d.t === "fib" ? fib(d.i1, d.p1, d.i2, d.p2, false) : seg(d.i1, d.p1, d.i2, d.p2, false));
+      if (pending && pending.c === cv.id && hover && hover.cv === cv)
+        (pending.t === "fib" ? fib : seg)(pending.i, pending.p, hover.x / bw - 0.5, inv(hover.y), true);
       else if (pending && pending.c === cv.id) { ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(x(pending.i), y(pending.p), 3, 0, 6.29); ctx.fill(); }
       ctx.restore();
     }
@@ -637,10 +661,10 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     cv.addEventListener("click", e => {
       if (!mode || !views[id]) return;
       const r = cv.getBoundingClientRect(), p = +views[id].inv(e.clientY - r.top).toFixed(2);
-      if (mode === "line") {
+      if (mode === "line" || mode === "fib") {
         const i = +((e.clientX - r.left) / views[id].bw - 0.5).toFixed(2);
-        if (!pending || pending.c !== id) pending = {c: id, i, p};
-        else { cur.drawings.push({c: id, i1: pending.i, p1: pending.p, i2: i, p2: p}); pending = null; }
+        if (!pending || pending.c !== id || pending.t !== mode) pending = {c: id, i, p, t: mode};
+        else { cur.drawings.push({t: mode, c: id, i1: pending.i, p1: pending.p, i2: i, p2: p}); pending = null; }
         renderLists(); draw(); return;
       }
       if (mode === "support") { if (cur.support !== "yes") setSeg("support", "yes"); if (cur.support_levels.length < 3) cur.support_levels.push(p); }
