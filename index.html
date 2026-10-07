@@ -295,10 +295,12 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
   }
   async function post(item) {
     const opts = {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(item)};
-    try { const r = await fetch(window.R2_ENDPOINT, opts); return await r.json(); }
-    catch (e) {
+    let r;
+    try { r = await fetch(window.R2_ENDPOINT, opts); }
+    catch (e) {                                  // network / CORS failure only: try an opaque send once
       try { await fetch(window.R2_ENDPOINT, {...opts, mode: "no-cors"}); return {ok: true}; } catch (e2) { return null; }
     }
+    try { return await r.json(); } catch (e) { return null; }   // busy / error page: keep queued and retry
   }
   async function drain() {
     while (outbox.length) {
