@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<style>:root{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<script>window.R2_ENDPOINT = "https://script.google.com/macros/s/AKfycbwBs25f9x7y-UCDJCNz_nN6qjt92cDt6AMiBiqFXGA4JP8C5fxViV82FYZPQDuRKoXGyg/exec";</script>
+</head><body>
+<title>R2 盲标台</title>
+<style>
+:root{
+  /* Layout: charts column (weekly, daily, SPY) + sticky label panel on the right; stacks under 960px */
+  --bg:#f3f4f2; --surface:#ffffff; --ink:#1c2321; --muted:#5f6b67; --line:#d9ddd9; --grid:#eceeec;
+  --accent:#1f6f8b; --accent-soft:#e3f0f4; --up:#2f7d5b; --down:#b4473a; --stop:#b4473a; --target:#2f7d5b;
+  --support:#1f6f8b; --ma1:#c08a2d; --ma2:#7b5ea7; --ma3:#5f6b67; --warn-soft:#fbf1dc;
+  --sans:"IBM Plex Sans","Noto Sans SC","PingFang SC",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141917; --surface:#1c2220; --ink:#e3e8e5; --muted:#9aa6a1; --line:#2e3633; --grid:#232a28;
+  --accent:#6fb8d2; --accent-soft:#1d2e35; --up:#5fbf8f; --down:#e2806f; --stop:#e2806f; --target:#5fbf8f;
+  --support:#6fb8d2; --ma1:#e0b25a; --ma2:#a990d6; --ma3:#9aa6a1; --warn-soft:#2e2615; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#141917; --surface:#1c2220; --ink:#e3e8e5; --muted:#9aa6a1; --line:#2e3633; --grid:#232a28;
+  --accent:#6fb8d2; --accent-soft:#1d2e35; --up:#5fbf8f; --down:#e2806f; --stop:#e2806f; --target:#5fbf8f;
+  --support:#6fb8d2; --ma1:#e0b25a; --ma2:#a990d6; --ma3:#9aa6a1; --warn-soft:#2e2615; color-scheme:dark;}
+body{background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.5; padding-inline:16px; padding-block:12px 40px}
+.top{display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; max-width:1500px; margin:0 auto 10px}
+.top h1{font-size:18px; margin:0; font-weight:600}
+.top .meta{display:flex; gap:12px; align-items:center; flex-wrap:wrap; color:var(--muted); font-size:13px}
+select,button,textarea{font:inherit; color:inherit}
+select{background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:4px 8px}
+.wrap{max-width:1500px; margin:0 auto; display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:16px}
+@media (max-width:960px){.wrap{grid-template-columns:1fr}}
+.charts{display:flex; flex-direction:column; gap:8px; min-width:0}
+.cbox{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:6px 8px 4px}
+.cbox .lab{display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--muted); font-family:var(--mono); letter-spacing:.03em}
+.cbox canvas{display:block; width:100%; cursor:crosshair}
+#cw{height:300px} #cd{height:330px} #cs{height:130px}
+.toggles{display:flex; gap:10px}
+.toggles label{display:flex; gap:4px; align-items:center; cursor:pointer}
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:12px 14px; position:sticky; top:env(safe-area-inset-top,0px); align-self:start; display:flex; flex-direction:column; gap:12px; max-height:calc(100vh - 24px); overflow:auto}
+.q{display:flex; flex-direction:column; gap:6px}
+.q > .t{font-weight:600}
+.row{display:flex; gap:6px; flex-wrap:wrap}
+.seg button{border:1px solid var(--line); background:var(--surface); border-radius:6px; padding:5px 12px; cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:var(--surface)}
+.seg button:focus-visible,.btn:focus-visible,.chip:focus-within{outline:2px solid var(--accent); outline-offset:2px}
+.btn{border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink); border-radius:6px; padding:5px 10px; cursor:pointer}
+.btn.mode-on{background:var(--accent); color:var(--surface)}
+.btn.primary{background:var(--accent); color:var(--surface); font-weight:600; padding:8px 12px}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.levels{display:flex; gap:6px; flex-wrap:wrap; font-family:var(--mono); font-size:12px}
+.levels span{border:1px solid var(--line); border-radius:4px; padding:1px 6px; display:inline-flex; gap:6px; align-items:center}
+.levels button{border:0; background:none; cursor:pointer; color:var(--muted); padding:0}
+.chip{border:1px solid var(--line); border-radius:999px; padding:2px 9px; display:inline-flex; gap:4px; align-items:center; cursor:pointer; font-size:13px}
+.chip input{margin:0}
+textarea{width:100%; min-height:48px; border:1px solid var(--line); border-radius:6px; background:var(--surface); padding:6px; box-sizing:border-box}
+.hint{color:var(--muted); font-size:12px}
+.hidden{display:none}
+.banner{background:var(--warn-soft); border:1px solid var(--line); border-radius:8px; padding:8px 12px; max-width:1500px; margin:0 auto 10px}
+.nav{display:flex; gap:8px; justify-content:space-between}
+.status{font-family:var(--mono); font-size:12px; color:var(--muted)}
+details.help{max-width:1500px; margin:0 auto 10px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:8px 12px}
+details.help summary{cursor:pointer; font-weight:600}
+details.help li{margin:2px 0}
+kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); border-radius:3px; padding:0 4px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="top">
+  <h1>R2 盲标台</h1>
+  <div class="meta">
+    <label for="orderSel">顺序</label>
+    <select id="orderSel"><option value="random">随机（标多少都行）</option><option value="batch">按批次</option></select>
+    <span id="batchWrap"><label for="batchSel">批次</label> <select id="batchSel"></select></span>
+    <span id="progress">载入中…</span>
+    <span id="saveState" class="status"></span>
+  </div>
+</div>
+<div id="banner" class="banner" hidden></div>
+<div id="onboard" class="banner" hidden>
+  <form id="obForm" class="q" autocomplete="off">
+    <div class="t">开始前请先填写（只填一次）</div>
+    <label>代号 / 昵称<input id="obAlias" required maxlength="40" style="margin-left:6px"></label>
+    <label>交易经验（年）<input id="obYears" type="number" min="0" max="60" step="0.5" required style="width:70px;margin-left:6px"></label>
+    <div class="row seg" data-ob="pa"><span>平时用价格行为（支撑阻力、K线形态等）做交易吗？</span>
+      <button type="button" data-v="yes" aria-pressed="false">用</button><button type="button" data-v="no" aria-pressed="false">不用</button></div>
+    <div class="row seg" data-ob="skill"><span>自评价格行为水平</span>
+      <button type="button" data-v="1" aria-pressed="false">1 很弱</button><button type="button" data-v="2" aria-pressed="false">2</button>
+      <button type="button" data-v="3" aria-pressed="false">3</button><button type="button" data-v="4" aria-pressed="false">4</button>
+      <button type="button" data-v="5" aria-pressed="false">5 很强</button></div>
+    <div class="row seg" data-ob="tf"><span>主要看的周期</span>
+      <button type="button" data-v="intraday" aria-pressed="false">日内</button><button type="button" data-v="daily" aria-pressed="false">日线</button>
+      <button type="button" data-v="weekly" aria-pressed="false">周线及以上</button></div>
+    <div class="hint">请独立标注，不要和其他标注人讨论图，也不要查任何外部信息。</div>
+    <div><button type="submit" class="btn primary">开始标注</button> <span id="obMsg" class="hint"></span></div>
+  </form>
+</div>
+<details class="help" id="ownerBox" hidden><summary>标注人进度（仅你可见）</summary><div id="ownerList" class="status">读取中…</div></details>
+<details class="help" id="help">
+  <summary>怎么标（第一次请先读）</summary>
+  <ul>
+    <li>每张图都停在<b>决策时点</b>：最后一根日线是今天的收盘，你只能看到这之前的数据。请当作明天要不要交易来判断。</li>
+    <li>价格已归一化（今天收盘 = 100），隐藏了股票代码、日期和板块。下方 SPY 图与日线同一时间窗口，同样归一化。</li>
+    <li>不要查任何外部信息。如果你认出了这只股票或这段时期，请勾选「我认得这张图」。</li>
+    <li>点「标支撑 / 设止损 / 设目标」后，在周线或日线图上点击即可放置价位；再点同一按钮退出。</li>
+    <li>快捷键：<kbd>S</kbd>/<kbd>D</kbd> 有/无明显支撑，<kbd>B</kbd>/<kbd>X</kbd> 会/不会买，<kbd>1</kbd>–<kbd>5</kbd> 信心，<kbd>L</kbd> 画线，<kbd>Enter</kbd> 保存并下一张，<kbd>←</kbd>/<kbd>→</kbd> 上一张/下一张。</li>
+    <li>默认随机出图，标多少张都可以，随时可以停下，已保存的不会丢。</li>
+    <li>可以用「画线」在周线或日线上画辅助线（点两下：起点、终点，会向右延长）。</li>
+  </ul>
+</details>
+
+<div class="wrap">
+  <div class="charts">
+    <div class="cbox"><div class="lab"><span>周线 · 对数坐标 · 最长 10 年</span><span id="cwInfo"></span></div><canvas id="cw"></canvas></div>
+    <div class="cbox"><div class="lab"><span>日线 · 约 18 个月</span>
+      <span class="toggles">
+        <label><input type="checkbox" id="tMa1" checked> EMA20</label>
+        <label><input type="checkbox" id="tMa2" checked> EMA50</label>
+        <label><input type="checkbox" id="tMa3" checked> SMA200</label>
+      </span></div><canvas id="cd"></canvas></div>
+    <div class="cbox"><div class="lab"><span>SPY · 同一时间窗口</span><span></span></div><canvas id="cs"></canvas></div>
+  </div>
+
+  <form class="panel" id="form" autocomplete="off">
+    <div class="status" id="chartTitle">—</div>
+
+    <div class="q">
+      <div class="t">1. 有明显的长期支撑吗？</div>
+      <div class="row seg" data-field="support">
+        <button type="button" data-v="yes" aria-pressed="false">有 <kbd>S</kbd></button>
+        <button type="button" data-v="no" aria-pressed="false">没有 <kbd>D</kbd></button>
+      </div>
+      <div id="supportBox" class="hidden q">
+        <div class="row"><button type="button" class="btn" id="mSupport">标支撑（可多条）</button></div>
+        <div class="levels" id="supportList"></div>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="t">2. 会买吗？</div>
+      <div class="row seg" data-field="buy">
+        <button type="button" data-v="yes" aria-pressed="false">会 <kbd>B</kbd></button>
+        <button type="button" data-v="no" aria-pressed="false">不会 <kbd>X</kbd></button>
+      </div>
+    </div>
+
+    <div id="buyBox" class="hidden q" style="gap:12px">
+      <div class="q">
+        <div class="t">信心</div>
+        <div class="row seg" data-field="confidence">
+          <button type="button" data-v="1" aria-pressed="false">1</button>
+          <button type="button" data-v="2" aria-pressed="false">2</button>
+          <button type="button" data-v="3" aria-pressed="false">3</button>
+          <button type="button" data-v="4" aria-pressed="false">4</button>
+          <button type="button" data-v="5" aria-pressed="false">5</button>
+        </div>
+      </div>
+      <div class="q">
+        <div class="t">入场方式</div>
+        <div class="row seg" data-field="entry">
+          <button type="button" data-v="buystop_confirm_high" aria-pressed="false">确认K线高点上方买入止损</button>
+          <button type="button" data-v="limit_at_support" aria-pressed="false">支撑位限价</button>
+          <button type="button" data-v="other" aria-pressed="false">其他</button>
+        </div>
+      </div>
+      <div class="q">
+        <div class="t">止损与目标</div>
+        <div class="row">
+          <button type="button" class="btn" id="mStop">设止损</button>
+          <button type="button" class="btn" id="mTarget">设目标</button>
+        </div>
+        <div class="levels" id="planList"></div>
+      </div>
+    </div>
+
+    <div class="q">
+      <div class="t">辅助线（可选）</div>
+      <div class="row">
+        <button type="button" class="btn" id="mLine">画线 <kbd>L</kbd></button>
+        <button type="button" class="btn" id="lineUndo">撤销</button>
+        <button type="button" class="btn" id="lineClear">清除</button>
+      </div>
+      <div class="hint" id="lineInfo">在周线或日线上点两下画一条线</div>
+    </div>
+
+    <div class="q">
+      <div class="t">原因（可多选）</div>
+      <div class="row" id="tags"></div>
+      <textarea id="note" placeholder="备注（可选）"></textarea>
+    </div>
+
+    <label class="chip" style="align-self:flex-start"><input type="checkbox" id="recog"> 我认得这张图 / 这段时期</label>
+
+    <button type="submit" class="btn primary" id="saveBtn" disabled>保存并下一张 <kbd>Enter</kbd></button>
+    <div class="hint" id="needHint">请先回答第 1、2 题；选「会」时还需要信心和止损。</div>
+    <div class="nav">
+      <button type="button" class="btn" id="prevBtn">← 上一张</button>
+      <button type="button" class="btn" id="nextBtn">下一张 →</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(() => {
+  const TAGS = [["multi_year_level","多年级别价位"],["prior_breakout","前突破位"],["round_number","整数关口"],["trendline","趋势线"],
+    ["moving_average","均线"],["gap","缺口"],["volume_climax","放量/抛售高潮"],["wick_rejection","长下影/拒绝"],
+    ["market_context","大盘环境"],["other","其他"]];
+  const $ = (id) => document.getElementById(id);
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  let manifest = [], batch = null, charts = [], idx = 0, labels = new Map();
+  let db = null, uid = null, labelsCol = null, mode = null, shownAt = Date.now(), hover = null, profile = null;
+  let isOwner = false, order = "random", pending = null, history = [];
+  const batchCache = new Map();
+  const ob = {pa: null, skill: null, tf: null};
+  let cur = emptyLabel();
+
+  function emptyLabel() {
+    return {support: null, support_levels: [], buy: null, confidence: null, entry: null, stop: null, target: null,
+            tags: [], note: "", recognized: false, drawings: []};
+  }
+
+  // ---------- tags ----------
+  $("tags").innerHTML = TAGS.map(([k, t]) =>
+    `<label class="chip"><input type="checkbox" value="${k}"> ${t}</label>`).join("");
+
+  // ---------- data ----------
+  async function loadManifest() {
+    const r = await fetch("r2data/manifest.json");
+    manifest = await r.json();
+    $("batchSel").innerHTML = manifest.map(m => `<option value="${m.batch}">第 ${m.batch} 批（${m.n} 张）</option>`).join("");
+  }
+  async function getBatch(b) {
+    if (!batchCache.has(b)) {
+      const m = manifest.find(x => x.batch === b);
+      $("progress").textContent = "载入图表…";
+      const r = await fetch("r2data/" + m.file);
+      batchCache.set(b, (await r.json()).charts);
+    }
+    return batchCache.get(b);
+  }
+  async function loadBatch(b) {
+    batch = b; charts = await getBatch(b);
+    try { localStorage.setItem("r2_batch", String(b)); } catch (e) {}
+    idx = Math.max(0, charts.findIndex(c => !labels.has(c.id)));
+    show();
+  }
+  async function nextRandom() {
+    // pick a batch at random (weighted by size), then a random unlabelled chart in it
+    const left = manifest.map(m => m.batch);
+    while (left.length) {
+      const w = left.map(b => manifest.find(m => m.batch === b).n), tot = w.reduce((a, x) => a + x, 0);
+      let r = Math.random() * tot, k = 0;
+      while (r > w[k]) { r -= w[k]; k++; }
+      const b = left.splice(Math.min(k, left.length - 1), 1)[0];
+      const cs = await getBatch(b);
+      const open = cs.map((c, i) => i).filter(i => !labels.has(cs[i].id));
+      if (open.length) {
+        batch = b; charts = cs; idx = open[Math.floor(Math.random() * open.length)];
+        history.push({b, id: charts[idx].id}); show(); return;
+      }
+    }
+    $("saveState").textContent = "所有图都标完了，谢谢！";
+  }
+  function setOrder(o) {
+    order = o; $("orderSel").value = o; $("batchWrap").hidden = o !== "batch";
+    try { localStorage.setItem("r2_order", o); } catch (e) {}
+  }
+  $("orderSel").onchange = async e => {
+    setOrder(e.target.value);
+    if (order === "batch") await loadBatch(Number($("batchSel").value) || manifest[0].batch); else await nextRandom();
+  };
+
+  // ---------- storage ----------
+  // ---------- site mode (outside claude.ai): local progress + POST to the Apps Script receiver ----------
+  function lsGet(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  let outbox = [], flushing = false;
+  function enqueue(item) {
+    outbox.push({...item, client_ts: new Date().toISOString()}); lsSet("r2_outbox", outbox); flush();
+  }
+  async function post(item) {
+    const opts = {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(item)};
+    try { const r = await fetch(window.R2_ENDPOINT, opts); return !!(await r.json()).ok; }
+    catch (e) {
+      try { await fetch(window.R2_ENDPOINT, {...opts, mode: "no-cors"}); return true; } catch (e2) { return false; }
+    }
+  }
+  async function flush() {
+    if (flushing) return;
+    flushing = true;
+    try {
+      while (outbox.length) {
+        if (!(await post(outbox[0]))) break;
+        outbox.shift(); lsSet("r2_outbox", outbox);
+      }
+    } finally { flushing = false; }
+    $("saveState").textContent = outbox.length ? `${outbox.length} 条待上传（联网后会自动重试）` : "已上传";
+    if (outbox.length) setTimeout(flush, 15000);
+  }
+  async function initHttp() {
+    uid = lsGet("r2_rater_id", null);
+    if (!uid) {
+      uid = "r_" + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, "0")).join("");
+      lsSet("r2_rater_id", uid);
+    }
+    profile = lsGet("r2_profile", null);
+    labels = new Map(Object.entries(lsGet("r2_labels", {})));
+    outbox = lsGet("r2_outbox", []);
+    db = {doc: () => ({set: async body => {
+      profile = body; lsSet("r2_profile", body); enqueue({type: "profile", rater_id: uid, ...body}); }})};
+    labelsCol = {doc: id => ({set: async body => {
+      labels.set(id, body); lsSet("r2_labels", Object.fromEntries(labels));
+      enqueue({type: "label", rater_id: uid, alias: profile && profile.alias, ...body}); }})};
+    if (!lsSet("r2_probe", 1)) {
+      const b = $("banner");
+      b.textContent = "这个浏览器不允许保存进度（例如无痕模式）：标注仍会上传，但关掉页面后无法接着标。";
+      b.hidden = false;
+    }
+    if (!profile) $("onboard").hidden = false;
+    flush();
+  }
+
+  async function initDb() {
+    if (window.R2_ENDPOINT) return initHttp();
+    const claude = window.claude;
+    if (!claude || !claude.use) return noDb();
+    const [d, u] = await Promise.all([claude.use("db"), claude.use("user")]);
+    if (!d || !u) return noDb();
+    const id = await u.id();
+    if (!id) return noDb();
+    db = d; uid = id;
+    const me = db.doc("r2/" + uid);
+    labelsCol = me.collection("labels");
+    try { const snap = await me.get(); profile = snap.exists ? snap.data() : null; } catch (e) { profile = null; }
+    if (!profile) $("onboard").hidden = false;
+    isOwner = await u.isOwner();
+    if (isOwner) ownerOverview();
+    await new Promise(resolve => {
+      let first = true;
+      labelsCol.onSnapshot(snap => {
+        labels = new Map(snap.docs.map(x => [x.id, x.data()]));
+        updateProgress();
+        if (first) { first = false; resolve(); }
+      }, () => { noDb("与存储的连接中断了。请刷新页面；已保存的标注不会丢失。"); resolve(); });
+    });
+  }
+  async function ownerOverview() {
+    $("ownerBox").hidden = false;
+    try {
+      const raters = await db.collection("r2").get();
+      const rows = [];
+      for (const r of raters.docs) {
+        const lab = await db.collection("r2/" + r.id + "/labels").get();
+        const p = r.data() || {};
+        rows.push(`${p.alias || "(未填代号)"} · 经验 ${p.years ?? "?"} 年 · 自评 ${p.skill ?? "?"} · 已标 ${lab.size}`);
+      }
+      $("ownerList").innerHTML = rows.length ? rows.map(x => `<div>${x.replace(/</g, "&lt;")}</div>`).join("") : "还没有标注人";
+    } catch (e) { $("ownerList").textContent = "读取失败，请刷新。"; }
+  }
+  document.querySelectorAll("#obForm .seg").forEach(seg => seg.addEventListener("click", e => {
+    const bt = e.target.closest("button"); if (!bt) return;
+    ob[seg.dataset.ob] = bt.dataset.v;
+    seg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === bt)));
+  }));
+  $("obForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!ob.pa || !ob.skill || !ob.tf) { $("obMsg").textContent = "请回答全部问题。"; return; }
+    const body = {alias: $("obAlias").value.trim().slice(0, 40), years: Number($("obYears").value), uses_pa: ob.pa,
+                  skill: Number(ob.skill), timeframe: ob.tf, created_at: new Date().toISOString()};
+    try { await db.doc("r2/" + uid).set(body); profile = body; $("onboard").hidden = true; validate(); }
+    catch (err) { $("obMsg").textContent = "保存失败。你可能只有查看权限：请让分享者把你设为 Editor。"; }
+  });
+  function noDb(msg) {
+    const b = $("banner");
+    b.textContent = msg || "这个视图无法保存标注。请在 claude.ai 登录后打开这个页面再标注。";
+    b.hidden = false;
+    $("saveBtn").disabled = true;
+  }
+
+  // ---------- form state ----------
+  function setSeg(field, v) {
+    cur[field] = v;
+    document.querySelectorAll(`.seg[data-field="${field}"] button`).forEach(bt =>
+      bt.setAttribute("aria-pressed", String(bt.dataset.v === String(v))));
+    if (field === "support") { $("supportBox").classList.toggle("hidden", v !== "yes"); if (v !== "yes") cur.support_levels = []; }
+    if (field === "buy") { $("buyBox").classList.toggle("hidden", v !== "yes");
+      if (v !== "yes") { cur.confidence = null; cur.entry = null; cur.stop = null; cur.target = null; } }
+    renderLists(); validate(); draw();
+  }
+  document.querySelectorAll(".seg").forEach(seg => seg.addEventListener("click", e => {
+    const bt = e.target.closest("button"); if (!bt) return;
+    const f = seg.dataset.field;
+    setSeg(f, f === "confidence" ? Number(bt.dataset.v) : bt.dataset.v);
+  }));
+  function setMode(m) {
+    mode = mode === m ? null : m;
+    $("mSupport").classList.toggle("mode-on", mode === "support");
+    $("mStop").classList.toggle("mode-on", mode === "stop");
+    $("mTarget").classList.toggle("mode-on", mode === "target");
+    $("mLine").classList.toggle("mode-on", mode === "line");
+    if (mode !== "line") pending = null;
+    renderLists(); draw();
+  }
+  $("mSupport").onclick = () => setMode("support");
+  $("mStop").onclick = () => setMode("stop");
+  $("mTarget").onclick = () => setMode("target");
+  $("mLine").onclick = () => setMode("line");
+  $("lineUndo").onclick = () => { if (pending) pending = null; else cur.drawings.pop(); renderLists(); draw(); };
+  $("lineClear").onclick = () => { cur.drawings = []; pending = null; renderLists(); draw(); };
+
+  function renderLists() {
+    $("supportList").innerHTML = cur.support_levels.map((p, i) =>
+      `<span>支撑 ${p.toFixed(2)} <button type="button" data-i="${i}" aria-label="删除">×</button></span>`).join("") ||
+      `<span class="hint" style="border:0">点按钮后在图上点击</span>`;
+    const pl = [];
+    if (cur.stop != null) pl.push(`<span>止损 ${cur.stop.toFixed(2)}</span>`);
+    if (cur.target != null) pl.push(`<span>目标 ${cur.target.toFixed(2)}</span>`);
+    $("planList").innerHTML = pl.join("");
+    $("lineInfo").textContent = cur.drawings.length ? `已画 ${cur.drawings.length} 条线` + (pending ? "，等待终点" : "")
+      : (pending ? "已选起点，再点一下终点" : "在周线或日线上点两下画一条线");
+  }
+  $("supportList").addEventListener("click", e => {
+    const b = e.target.closest("button[data-i]"); if (!b) return;
+    cur.support_levels.splice(Number(b.dataset.i), 1); renderLists(); draw();
+  });
+  function validate() {
+    let ok = cur.support !== null && cur.buy !== null;
+    if (cur.buy === "yes") ok = ok && cur.confidence !== null && cur.stop !== null;
+    if (cur.support === "yes") ok = ok && cur.support_levels.length > 0;
+    $("saveBtn").disabled = !ok || !db || !profile;
+    $("needHint").hidden = ok;
+  }
+
+  // ---------- show / save ----------
+  function show() {
+    const c = charts[idx];
+    const saved = labels.get(c.id);
+    cur = saved ? {...emptyLabel(), ...JSON.parse(JSON.stringify(saved))} : emptyLabel();
+    ["support", "buy", "confidence", "entry"].forEach(f => setSegSilent(f, cur[f]));
+    $("supportBox").classList.toggle("hidden", cur.support !== "yes");
+    $("buyBox").classList.toggle("hidden", cur.buy !== "yes");
+    document.querySelectorAll("#tags input").forEach(i => i.checked = cur.tags.includes(i.value));
+    $("note").value = cur.note || "";
+    $("recog").checked = !!cur.recognized;
+    mode = null; pending = null; ["mSupport", "mStop", "mTarget", "mLine"].forEach(id => $(id).classList.remove("mode-on"));
+    $("chartTitle").textContent = (order === "random" ? `随机 · ${c.id}` : `第 ${batch} 批 · 第 ${idx + 1} / ${charts.length} 张 · ${c.id}`)
+      + (saved ? " · 已标" : "");
+    renderLists(); validate(); updateProgress(); draw();
+    shownAt = Date.now();
+  }
+  function setSegSilent(field, v) {
+    document.querySelectorAll(`.seg[data-field="${field}"] button`).forEach(bt =>
+      bt.setAttribute("aria-pressed", String(v !== null && bt.dataset.v === String(v))));
+  }
+  function updateProgress() {
+    if (!charts.length) return;
+    const done = charts.filter(c => labels.has(c.id)).length;
+    $("progress").textContent = order === "random" ? `你已标 ${labels.size} 张` : `本批已标 ${done} / ${charts.length} · 全部已标 ${labels.size}`;
+  }
+  $("form").addEventListener("submit", async e => {
+    e.preventDefault();
+    if ($("saveBtn").disabled) return;
+    const c = charts[idx];
+    cur.tags = [...document.querySelectorAll("#tags input:checked")].map(i => i.value);
+    cur.note = $("note").value.trim().slice(0, 2000);
+    cur.recognized = $("recog").checked;
+    const prev = labels.get(c.id);
+    const body = {...cur, chart_id: c.id, batch, order_mode: order, saved_at: new Date().toISOString(),
+                  seconds: Math.round((Date.now() - shownAt) / 1000) + (prev && prev.seconds ? prev.seconds : 0),
+                  edits: prev ? (prev.edits || 0) + 1 : 0};
+    $("saveState").textContent = "保存中…";
+    $("saveBtn").disabled = true;
+    try {
+      await labelsCol.doc(c.id).set(body);
+      labels.set(c.id, body);
+      $("saveState").textContent = "已保存";
+      if (order === "random") { await nextRandom(); return; }
+      const next = charts.findIndex((x, i) => i > idx && !labels.has(x.id));
+      if (next >= 0) { idx = next; show(); }
+      else if (idx < charts.length - 1) { idx += 1; show(); }
+      else { show(); $("saveState").textContent = "本批已全部标完"; }
+    } catch (err) {
+      $("saveState").textContent = "保存失败：" + (err && err.code === "quota_exceeded" ? "存储已满"
+        : err && err.code === "invalid_argument" ? "没有写入权限（请让分享者把你设为 Editor）" : "请稍后再试");
+      validate();
+    }
+  });
+  $("prevBtn").onclick = async () => {
+    if (order === "random") {
+      if (history.length < 2) return;
+      history.pop(); const h = history[history.length - 1];
+      batch = h.b; charts = await getBatch(h.b); idx = charts.findIndex(c => c.id === h.id); show(); return;
+    }
+    if (idx > 0) { idx -= 1; show(); }
+  };
+  $("nextBtn").onclick = async () => {
+    if (order === "random") { await nextRandom(); return; }
+    if (idx < charts.length - 1) { idx += 1; show(); }
+  };
+  $("batchSel").onchange = e => loadBatch(Number(e.target.value));
+  ["tMa1", "tMa2", "tMa3"].forEach(id => $(id).onchange = draw);
+
+  document.addEventListener("keydown", e => {
+    if (["TEXTAREA", "SELECT", "INPUT"].includes(e.target.tagName) && e.target.type !== "checkbox") return;
+    if (!$("onboard").hidden) return;
+    const k = e.key.toLowerCase();
+    if (k === "s") setSeg("support", "yes");
+    else if (k === "d") setSeg("support", "no");
+    else if (k === "b") setSeg("buy", "yes");
+    else if (k === "x") setSeg("buy", "no");
+    else if ("12345".includes(k) && k.length === 1 && cur.buy === "yes") setSeg("confidence", Number(k));
+    else if (k === "l") setMode("line");
+    else if (k === "escape") { pending = null; setMode(null); }
+    else if (k === "enter") { e.preventDefault(); $("form").requestSubmit(); }
+    else if (k === "arrowleft") $("prevBtn").click();
+    else if (k === "arrowright") $("nextBtn").click();
+    else return;
+  });
+
+  // ---------- charts ----------
+  const views = {};
+  function setupCanvas(cv) {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    cv.width = Math.max(1, Math.round(r.width * dpr)); cv.height = Math.max(1, Math.round(r.height * dpr));
+    const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {ctx, W: r.width, H: r.height};
+  }
+  function niceTicks(lo, hi, n, log) {
+    if (log) {
+      const out = []; const steps = [1, 2, 5];
+      for (let e = Math.floor(Math.log10(lo)) - 1; e <= Math.ceil(Math.log10(hi)) + 1; e++)
+        for (const s of steps) { const v = s * Math.pow(10, e); if (v >= lo && v <= hi) out.push(v); }
+      return out.length > n * 2 ? out.filter((_, i) => i % 2 === 0) : out;
+    }
+    const span = hi - lo, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 5, 10].map(m => m * mag).find(s => span / s <= n) || mag * 10;
+    const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(+v.toFixed(6));
+    return out;
+  }
+  function drawOHLC(cv, d, opts) {
+    const {ctx, W, H} = setupCanvas(cv);
+    const padR = 50, padT = 6, volH = opts.vol ? H * 0.16 : 0, padB = 4;
+    const [O, Hh, L, C, V] = d;
+    const n = C.length, pw = W - padR, ph = H - padT - padB - volH;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) { if (L[i] != null) lo = Math.min(lo, L[i]); if (Hh[i] != null) hi = Math.max(hi, Hh[i]); }
+    for (const p of opts.extra || []) if (p != null) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+    const m = (hi - lo) * 0.04; lo = Math.max(opts.log ? lo * 0.97 : lo - m, 0.01); hi = opts.log ? hi * 1.03 : hi + m;
+    const f = opts.log ? Math.log : (x => x);
+    const y = p => padT + (f(hi) - f(p)) / (f(hi) - f(lo)) * ph;
+    const inv = py => { const t = f(hi) - (py - padT) / ph * (f(hi) - f(lo)); return opts.log ? Math.exp(t) : t; };
+    const bw = pw / n, x = i => (i + 0.5) * bw;
+    ctx.fillStyle = css("--surface"); ctx.fillRect(0, 0, W, H);
+    ctx.font = "11px " + css("--mono"); ctx.textBaseline = "middle";
+    for (const t of niceTicks(lo, hi, 6, opts.log)) {
+      ctx.strokeStyle = css("--grid"); ctx.beginPath(); ctx.moveTo(0, y(t)); ctx.lineTo(pw, y(t)); ctx.stroke();
+      ctx.fillStyle = css("--muted"); ctx.fillText(t >= 100 ? t.toFixed(0) : t.toFixed(t >= 10 ? 1 : 2), pw + 4, y(t));
+    }
+    if (opts.vol && V) {
+      const vm = Math.max(...V.filter(v => v != null), 1);
+      ctx.fillStyle = css("--line");
+      for (let i = 0; i < n; i++) { const vh = (V[i] || 0) / vm * (volH - 2); ctx.fillRect(x(i) - Math.max(bw * 0.35, 0.5), H - padB - vh, Math.max(bw * 0.7, 1), vh); }
+    }
+    for (const ma of opts.mas || []) {
+      if (!ma.on) continue;
+      ctx.strokeStyle = css(ma.color); ctx.lineWidth = 1.2; ctx.beginPath(); let st = false;
+      for (let i = 0; i < n; i++) { const v = ma.data[i]; if (v == null) { st = false; continue; } st ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); st = true; }
+      ctx.stroke(); ctx.lineWidth = 1;
+    }
+    if (opts.line) {
+      ctx.strokeStyle = css("--accent"); ctx.lineWidth = 1.3; ctx.beginPath();
+      for (let i = 0; i < n; i++) i ? ctx.lineTo(x(i), y(C[i])) : ctx.moveTo(x(i), y(C[i]));
+      ctx.stroke(); ctx.lineWidth = 1;
+    } else {
+      for (let i = 0; i < n; i++) {
+        if (C[i] == null) continue;
+        const up = C[i] >= O[i]; ctx.strokeStyle = ctx.fillStyle = css(up ? "--up" : "--down");
+        ctx.beginPath(); ctx.moveTo(x(i), y(Hh[i])); ctx.lineTo(x(i), y(L[i])); ctx.stroke();
+        if (bw >= 3) { const top = y(Math.max(O[i], C[i])), bh = Math.max(1, Math.abs(y(O[i]) - y(C[i]))); ctx.fillRect(x(i) - bw * 0.32, top, bw * 0.64, bh); }
+        else { ctx.beginPath(); ctx.moveTo(x(i), y(C[i])); ctx.lineTo(x(i) + Math.max(bw * 0.5, 1), y(C[i])); ctx.stroke(); }
+      }
+    }
+    // horizontal labels (support / stop / target / last close)
+    const hl = (p, color, dash, text) => {
+      if (p == null || p < lo || p > hi) return;
+      ctx.strokeStyle = css(color); ctx.setLineDash(dash); ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(0, y(p)); ctx.lineTo(pw, y(p)); ctx.stroke(); ctx.setLineDash([]); ctx.lineWidth = 1;
+      ctx.fillStyle = css(color); ctx.fillText(text, 4, y(p) - 8);
+    };
+    if (opts.marks) {
+      cur.support_levels.forEach(p => hl(p, "--support", [], "支撑 " + p.toFixed(2)));
+      hl(cur.stop, "--stop", [5, 4], "止损 " + (cur.stop != null ? cur.stop.toFixed(2) : ""));
+      hl(cur.target, "--target", [5, 4], "目标 " + (cur.target != null ? cur.target.toFixed(2) : ""));
+    }
+    if (opts.marks) {
+      const seg = (i1, p1, i2, p2, dashed) => {
+        if (!(p1 > 0 && p2 > 0)) return;
+        const X1 = x(i1), Y1 = y(p1), X2 = x(i2), Y2 = y(p2);
+        ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.3; ctx.setLineDash(dashed ? [4, 3] : []);
+        ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
+        if (!dashed && X2 !== X1) {
+          const xr = X2 > X1 ? pw : 0, yr = Y1 + (Y2 - Y1) * (xr - X1) / (X2 - X1);
+          ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(X2, Y2); ctx.lineTo(xr, yr); ctx.stroke();
+        }
+        ctx.setLineDash([]); ctx.lineWidth = 1; ctx.fillStyle = css("--ink");
+        [[X1, Y1], [X2, Y2]].forEach(([a, b]) => { ctx.beginPath(); ctx.arc(a, b, 2.5, 0, 6.29); ctx.fill(); });
+      };
+      ctx.save(); ctx.beginPath(); ctx.rect(0, padT, pw, ph); ctx.clip();
+      cur.drawings.filter(d => d.c === cv.id).forEach(d => seg(d.i1, d.p1, d.i2, d.p2, false));
+      if (pending && pending.c === cv.id && hover && hover.cv === cv) seg(pending.i, pending.p, hover.x / bw - 0.5, inv(hover.y), true);
+      else if (pending && pending.c === cv.id) { ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(x(pending.i), y(pending.p), 3, 0, 6.29); ctx.fill(); }
+      ctx.restore();
+    }
+    if (hover && hover.cv === cv) {
+      ctx.strokeStyle = css("--muted"); ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(0, hover.y); ctx.lineTo(pw, hover.y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = css("--ink"); ctx.fillRect(pw, hover.y - 8, padR, 16); ctx.fillStyle = css("--surface");
+      ctx.fillText(inv(hover.y).toFixed(2), pw + 4, hover.y);
+    }
+    views[cv.id] = {inv, pw, padT, ph, bw};
+  }
+  function draw() {
+    if (!charts.length) return;
+    const c = charts[idx];
+    drawOHLC($("cw"), c.w, {log: true, vol: true, marks: true, extra: []});
+    drawOHLC($("cd"), c.d, {vol: true, marks: true, extra: [],
+      mas: [{data: c.ma[0], color: "--ma1", on: $("tMa1").checked}, {data: c.ma[1], color: "--ma2", on: $("tMa2").checked},
+            {data: c.ma[2], color: "--ma3", on: $("tMa3").checked}]});
+    drawOHLC($("cs"), c.spy, {line: true});
+    $("cwInfo").textContent = `${c.w[3].length} 周`;
+  }
+  ["cw", "cd"].forEach(id => {
+    const cv = $(id);
+    cv.addEventListener("mousemove", e => { const r = cv.getBoundingClientRect(); hover = {cv, x: e.clientX - r.left, y: e.clientY - r.top}; draw(); });
+    cv.addEventListener("mouseleave", () => { hover = null; draw(); });
+    cv.addEventListener("click", e => {
+      if (!mode || !views[id]) return;
+      const r = cv.getBoundingClientRect(), p = +views[id].inv(e.clientY - r.top).toFixed(2);
+      if (mode === "line") {
+        const i = +((e.clientX - r.left) / views[id].bw - 0.5).toFixed(2);
+        if (!pending || pending.c !== id) pending = {c: id, i, p};
+        else { cur.drawings.push({c: id, i1: pending.i, p1: pending.p, i2: i, p2: p}); pending = null; }
+        renderLists(); draw(); return;
+      }
+      if (mode === "support") { if (cur.support !== "yes") setSeg("support", "yes"); if (cur.support_levels.length < 3) cur.support_levels.push(p); }
+      if (mode === "stop") cur.stop = p;
+      if (mode === "target") cur.target = p;
+      renderLists(); validate(); draw();
+    });
+  });
+  window.addEventListener("resize", draw);
+  if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  new MutationObserver(draw).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+
+  // ---------- start ----------
+  (async () => {
+    try { await loadManifest(); } catch (e) { $("progress").textContent = "图表数据载入失败，请刷新。"; return; }
+    await initDb();
+    let o = null, b = manifest[0].batch;
+    try {
+      o = localStorage.getItem("r2_order");
+      const s = Number(localStorage.getItem("r2_batch")); if (manifest.some(m => m.batch === s)) b = s;
+    } catch (e) {}
+    setOrder(o === "batch" || o === "random" ? o : (isOwner ? "batch" : "random"));
+    $("batchSel").value = String(b);
+    if (order === "batch") await loadBatch(b); else await nextRandom();
+    validate();
+  })();
+})();
+</script>
+
+</body></html>
