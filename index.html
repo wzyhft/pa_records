@@ -377,10 +377,13 @@ kbd{font-family:var(--mono); font-size:11px; border:1px solid var(--line); borde
     labels = new Map(Object.entries(lsGet("r2_labels", {})));
     outbox = lsGet("r2_outbox", []);
     keys = lsGet("r2_keys", {}); revealedMap = lsGet("r2_revealed", {}); pendingRev = lsGet("r2_pending_rev", []);
-    arm = parseInt(uid.slice(-2), 16) % 2 === 0 ? "immediate" : "delayed20";
+    arm = "immediate";                          // everyone sees each chart's result after saving (design §18 amendment)
+    if (pendingRev.length) {                    // charts left from the former every-20 arm: reveal now
+      const left = pendingRev.splice(0); lsSet("r2_pending_rev", pendingRev);
+      for (const it of left) await reveal(it.id);
+    }
     const li = document.createElement("li");
-    li.textContent = arm === "immediate" ? "每保存一张，会显示这张图之后 60 个交易日的走势。看过结果的图不能再修改。"
-      : "每标完 20 张，会统一显示这 20 张图之后 60 个交易日的走势。看过结果的图不能再修改。";
+    li.textContent = "每保存一张，会显示这张图之后 60 个交易日的走势。看过结果的图不能再修改。";
     $("help").querySelector("ul").appendChild(li);
     db = {doc: () => ({set: async body => {
       profile = body; lsSet("r2_profile", body); await enqueue({type: "profile", rater_id: uid, arm, ...body}); }})};
